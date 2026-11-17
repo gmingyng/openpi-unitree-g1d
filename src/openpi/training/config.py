@@ -19,6 +19,7 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.g1d_policy as g1d_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
@@ -223,6 +224,90 @@ class SimpleDataConfig(DataConfigFactory):
             data_transforms=self.data_transforms(model_config),
             model_transforms=self.model_transforms(model_config),
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class _LeRobotG1DDataConfig(DataConfigFactory):
+    """LeRobot storage mapping for already-relative G1-D arm actions.
+
+    Raw actions are relative to their row's absolute state; grippers are absolute.
+    Read future states alongside actions and rebase the sampled chunk to its first
+    state. Online actions then use that fixed observation reference. Generic
+    DeltaActions/AbsoluteActions are not applied to already-relative actions.
+    """
+
+    state_dim: int = 16
+    action_dim: tyro.conf.Suppress[int] = 16
+    action_space: tyro.conf.Suppress[Literal["joint", "eef"]] = "joint"
+    eef_delta_frame: Literal["base", "tool"] = "base"
+    # Absolute EEF pose field for training when model state uses joint feedback.
+    eef_state_key: str | None = None
+    state_key: str = "observation.state"
+    action_key: str = "action"
+    head_image_key: str = "observation.images.head"
+    left_wrist_image_key: str = "observation.images.left_wrist"
+    right_wrist_image_key: str = "observation.images.right_wrist"
+    prompt_from_task: bool = True
+    default_prompt: str | None = None
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        if min(self.state_dim, self.action_dim) <= 0 or max(self.state_dim, self.action_dim) > model_config.action_dim:
+            raise ValueError("G1-D state/action dimensions must fit within the model action dimension")
+        structure = {
+            "observation/state": self.state_key,
+            "observation/images/head": self.head_image_key,
+            "observation/images/left_wrist": self.left_wrist_image_key,
+            "observation/images/right_wrist": self.right_wrist_image_key,
+            "actions": self.action_key,
+        }
+        sequence_keys = [self.action_key, self.state_key]
+        if self.action_space == "eef" and self.state_dim != 14:
+            if not self.eef_state_key:
+                raise ValueError("EEF with non-pose model state requires eef_state_key for absolute EEF poses")
+            if self.eef_state_key == self.state_key:
+                raise ValueError("Joint feedback and EEF reference poses must use different dataset fields")
+            structure["observation/eef_state"] = self.eef_state_key
+            sequence_keys.append(self.eef_state_key)
+        if self.prompt_from_task:
+            structure["prompt"] = "prompt"
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=_transforms.Group(inputs=[_transforms.RepackTransform(structure)]),
+            data_transforms=_transforms.Group(
+                inputs=[
+                    g1d_policy.G1DInputs(
+                        state_dim=self.state_dim,
+                        action_dim=self.action_dim,
+                        action_space=self.action_space,
+                        eef_delta_frame=self.eef_delta_frame,
+                    )
+                ],
+                outputs=[g1d_policy.G1DOutputs(action_dim=self.action_dim)],
+            ),
+            model_transforms=ModelTransformFactory(default_prompt=self.default_prompt)(model_config),
+            action_sequence_keys=tuple(dict.fromkeys(sequence_keys)),
+            prompt_from_task=self.prompt_from_task,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotG1DJointDataConfig(_LeRobotG1DDataConfig):
+    """16-D [left dq(7), gripper, right dq(7), gripper]; no waist/base actions."""
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotG1DEEFDataConfig(_LeRobotG1DDataConfig):
+    """14-D [left dxyz(3), drotvec(3), gripper, right dxyz(3), drotvec(3), gripper].
+
+    Default state is [left xyz(3), rotvec(3), gripper, right xyz(3), rotvec(3), gripper].
+    Set state_dim=16 if the dataset instead supplies joint-and-gripper feedback.
+    Coordinate frames and rotation composition must match data collection/execution.
+    """
+
+    state_dim: int = 14
+    action_dim: tyro.conf.Suppress[int] = 14
+    action_space: tyro.conf.Suppress[Literal["joint", "eef"]] = "eef"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -648,6 +733,38 @@ _CONFIGS = [
     # are using, and other hyperparameters like how many training steps to run or what learning rate to use.
     # For your own dataset, you can copy this class and modify the dataset name, and data transforms based on
     # the comments below.
+    TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi05_g1d",
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotG1DEEFDataConfig(
+            repo_id="/todo",
+            assets=AssetsConfig(
+                assets_dir="/todo",
+                asset_id="g1d",
+            ),
+            base_config=DataConfig(
+                # This flag determines whether we load the prompt (i.e. the task instruction) from the
+                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
+                # a field called ``prompt`` in the input dict. The recommended setting is True.
+                prompt_from_task=True,
+            ),
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        num_train_steps=30_000,
+    ),
+
+
     TrainConfig(
         # Change the name to reflect your model and dataset.
         name="pi0_libero",
