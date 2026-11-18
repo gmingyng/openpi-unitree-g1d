@@ -27,7 +27,7 @@ def make_observation(contract: dict) -> dict:
     }
     if set(images) != set(contract["image_keys"]):
         raise ValueError(f"Unexpected camera keys {contract['image_keys']}")
-    return {**images, contract["state_key"]: state, extra_key: extra, "prompt": "Pick up the box."}
+    return {**images, contract["state_key"]: state, extra_key: extra, "prompt": "test"}
 
 
 def robot_observation(contract: dict) -> dict:
@@ -36,7 +36,7 @@ def robot_observation(contract: dict) -> dict:
     return {
         contract["state_key"]: np.linspace(0.1, 0.4, contract["state_dim"], dtype=np.float32),
         **({"images": images} if contract.get("image_container_key") else images),
-        "prompt": "Pick up the box.",
+        "prompt": "test",
         "_unitree": {"sequence": 1, "joint_positions": [0.1] * 14, "joint_velocities": [0.] * 14,
                      "waist_q3": [0.] * 3, "grip_q2": [0.2, 0.3], "last_action": {"status": "idle"}},
     }
@@ -69,6 +69,17 @@ def run(host: str, port: int) -> None:
         client._ws.close()  # WebsocketClientPolicy currently has no public close method.
 
 
+def fixed_norm_stats(data) -> dict:
+    from openpi.shared.normalize import NormStats
+
+    # Non-identity scales exercise both forward and inverse transforms.
+    return {
+        key: NormStats(mean=np.zeros(dim, dtype=np.float32), std=np.full(dim, 2.0, dtype=np.float32),
+                       q01=np.full(dim, -2.0, dtype=np.float32), q99=np.full(dim, 2.0, dtype=np.float32))
+        for key, dim in (("state", data.state_dim), ("actions", data.action_dim))
+    }
+
+
 def serve_ones(host: str, port: int, legacy_12: bool = False) -> None:
     from openpi_client import base_policy
 
@@ -94,7 +105,7 @@ def serve_ones(host: str, port: int, legacy_12: bool = False) -> None:
                 raise ValueError(f"Expected finite float32 EEF state[{dim}], got {state.shape} {state.dtype}")
             values = state.astype(np.float64)
             inputs = {"observation/state": ((values - values.mean()) / max(values.std(), 1e-6)).astype(np.float32),
-                      "prompt": obs["prompt"]}
+                      "prompt": obs.get("prompt")}
             images = obs["images"] if legacy_12 else obs
             for camera, wire_key in zip(cameras, image_keys, strict=True):
                 image = images[wire_key]
@@ -133,9 +144,18 @@ if __name__ == "__main__":
     if args.no_checkpoint:
         serve_ones(args.host or "0.0.0.0", args.port, args.legacy_12)
     elif args.checkpoint:
-        from examples.g1d import main
+        from examples.g1d import real_env
+        from openpi.policies import policy_config
+        from openpi.serving.websocket_policy_server import WebsocketPolicyServer
+        from openpi.training import config
 
-        main.main(main.Args(config=args.config or "pi05_g1d", checkpoint=args.checkpoint,
-                            host=args.host or "0.0.0.0", port=args.port))
+        train_config = config.get_config(args.config or "pi05_g1d")
+        data = train_config.data
+        if not isinstance(data, (config.LeRobotG1DEEFDataConfig, config.LeRobotG1DJointDataConfig)):
+            parser.error("--config must use a G1-D data factory")
+        policy = policy_config.create_trained_policy(train_config, args.checkpoint,
+                                                    default_prompt=data.default_prompt, norm_stats=fixed_norm_stats(data))
+        env = real_env.wrap_policy(policy, train_config, train_config.name, data.default_prompt)
+        WebsocketPolicyServer(policy=env, host=args.host or "0.0.0.0", port=args.port, metadata=env.metadata).serve_forever()
     else:
         run(args.host or "127.0.0.1", args.port)

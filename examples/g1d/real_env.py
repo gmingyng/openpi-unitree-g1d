@@ -97,6 +97,11 @@ def create_environment(
     policy = policy_config.create_trained_policy(
         train_config, checkpoint, default_prompt=prompt, pytorch_device=pytorch_device
     )
+    return wrap_policy(policy, train_config, config_name, prompt)
+
+
+def wrap_policy(policy, train_config, config_name: str, prompt: str | None) -> G1DRealEnvironment:
+    data_factory = train_config.data
     return G1DRealEnvironment(
         policy,
         action_space=data_factory.action_space,
