@@ -45,7 +45,7 @@ def environment(policy, *, action_space="joint", state_dim=None, action_horizon=
 
 
 class G1DRealEnvironmentTest(unittest.TestCase):
-    def test_relative_response_is_not_added_to_state(self) -> None:
+    def test_absolute_joint_and_relative_eef_responses(self) -> None:
         for space, dim in (("joint", 16), ("eef", 14)):
             with self.subTest(space=space):
                 policy = RecordingPolicy(dim)
@@ -53,7 +53,11 @@ class G1DRealEnvironmentTest(unittest.TestCase):
                 obs = observation(dim)
                 obs["telemetry"] = {"temperature": 30}
                 result = env.infer(obs)
-                np.testing.assert_allclose(result["actions"], 0.1)
+                expected = np.full((2, dim), 0.1, dtype=np.float32)
+                if space == "joint":
+                    expected[:, :7] += 10
+                    expected[:, 8:15] += 10
+                np.testing.assert_allclose(result["actions"], expected)
                 np.testing.assert_allclose(policy.last_obs["observation/state"], 10)
                 self.assertNotIn("telemetry", policy.last_obs)
                 self.assertIn("telemetry", obs)
@@ -71,8 +75,8 @@ class G1DRealEnvironmentTest(unittest.TestCase):
         for key, value in (
             ("observation/state", np.zeros(14)),
             ("observation/state", np.full(16, np.inf)),
-            ("observation/images/head", np.zeros((3, 12, 16), dtype=np.uint8)),
-            ("observation/images/head", np.zeros((12, 16, 3), dtype=np.float32)),
+            ("observation/images/high", np.zeros((3, 12, 16), dtype=np.uint8)),
+            ("observation/images/high", np.zeros((12, 16, 3), dtype=np.float32)),
             ("prompt", ""),
         ):
             with self.subTest(key=key):

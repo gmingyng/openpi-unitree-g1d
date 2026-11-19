@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -228,14 +229,10 @@ class SimpleDataConfig(DataConfigFactory):
 
 @dataclasses.dataclass(frozen=True)
 class _LeRobotG1DDataConfig(DataConfigFactory):
-    """LeRobot storage mapping for already-relative G1-D arm actions.
+    """Map stored G1-D actions to a chunk anchored at the request observation."""
 
-    Raw actions are relative to their row's absolute state; grippers are absolute.
-    Read future states alongside actions and rebase the sampled chunk to its first
-    state. Online actions then use that fixed observation reference. Generic
-    DeltaActions/AbsoluteActions are not applied to already-relative actions.
-    """
-
+    absolute_joint_targets: bool = False
+    grippers_last: bool = False
     state_dim: int = 16
     action_dim: tyro.conf.Suppress[int] = 16
     action_space: tyro.conf.Suppress[Literal["joint", "eef"]] = "joint"
@@ -244,7 +241,7 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
     eef_state_key: str | None = None
     state_key: str = "observation.state"
     action_key: str = "action"
-    head_image_key: str = "observation.images.head"
+    head_image_key: str = "observation.images.cam_left_high"
     left_wrist_image_key: str = "observation.images.left_wrist"
     right_wrist_image_key: str = "observation.images.right_wrist"
     prompt_from_task: bool = True
@@ -256,12 +253,17 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
             raise ValueError("G1-D state/action dimensions must fit within the model action dimension")
         structure = {
             "observation/state": self.state_key,
-            "observation/images/head": self.head_image_key,
+            "observation/images/high": self.head_image_key,
             "observation/images/left_wrist": self.left_wrist_image_key,
             "observation/images/right_wrist": self.right_wrist_image_key,
             "actions": self.action_key,
         }
-        sequence_keys = [self.action_key, self.state_key]
+        if (self.absolute_joint_targets or self.grippers_last) and (self.action_space != "joint" or self.state_dim != 16):
+            raise ValueError("Absolute joint targets and grippers-last layout require 16-D joint feedback")
+        repack = [_transforms.RepackTransform(structure)]
+        if self.grippers_last:
+            repack.append(g1d_policy.GrippersLastToArmOrder())
+        sequence_keys = [self.action_key] if self.absolute_joint_targets else [self.action_key, self.state_key]
         if self.action_space == "eef" and self.state_dim != 14:
             if not self.eef_state_key:
                 raise ValueError("EEF with non-pose model state requires eef_state_key for absolute EEF poses")
@@ -273,10 +275,11 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
             structure["prompt"] = "prompt"
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
-            repack_transforms=_transforms.Group(inputs=[_transforms.RepackTransform(structure)]),
+            repack_transforms=_transforms.Group(inputs=repack),
             data_transforms=_transforms.Group(
                 inputs=[
                     g1d_policy.G1DInputs(
+                        absolute_joint_targets=self.absolute_joint_targets,
                         state_dim=self.state_dim,
                         action_dim=self.action_dim,
                         action_space=self.action_space,
@@ -294,6 +297,8 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
 @dataclasses.dataclass(frozen=True)
 class LeRobotG1DJointDataConfig(_LeRobotG1DDataConfig):
     """16-D [left dq(7), gripper, right dq(7), gripper]; no waist/base actions."""
+
+    absolute_joint_targets: bool = True
 
 
 @dataclasses.dataclass(frozen=True)
@@ -743,18 +748,15 @@ _CONFIGS = [
         # Here you define the dataset you are training on. In this example we use the Libero
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
-        data=LeRobotG1DEEFDataConfig(
-            repo_id="/todo",
-            assets=AssetsConfig(
-                assets_dir="/todo",
-                asset_id="g1d",
-            ),
-            base_config=DataConfig(
-                # This flag determines whether we load the prompt (i.e. the task instruction) from the
-                # ``task`` field in the LeRobot dataset. If set to True, the prompt will show up in
-                # a field called ``prompt`` in the input dict. The recommended setting is True.
-                prompt_from_task=True,
-            ),
+        data=LeRobotG1DJointDataConfig(
+            repo_id=os.environ.get("G1D_DATASET_ROOT", str(
+                pathlib.Path(__file__).resolve().parents[4] / "datasets/MarketDemo/g1d_pick_place_controller_dex1_v1"
+            )),
+            assets=AssetsConfig(asset_id="marketdemo_g1d_chunk_joint"),
+            grippers_last=True,
+            head_image_key="observation.images.cam_left_high",
+            left_wrist_image_key="observation.images.cam_left_wrist",
+            right_wrist_image_key="observation.images.cam_right_wrist",
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.

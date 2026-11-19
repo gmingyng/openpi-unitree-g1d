@@ -2,7 +2,7 @@
 
 Arm actions are already relative to the absolute observation anchoring the chunk.
 Grippers are absolute values. Training per-row references are rebased to the
-chunk-start state; online predictions stay relative until robot-side execution.
+chunk-start state; the cloud adapter restores absolute joint targets after unnormalization.
 """
 
 import dataclasses
@@ -13,7 +13,7 @@ import numpy as np
 
 # Model slot names stay fixed; source keys describe G1-D cameras.
 CAMERA_KEYS = {
-    "base_0_rgb": "observation/images/head",
+    "base_0_rgb": "observation/images/high",
     "left_wrist_0_rgb": "observation/images/left_wrist",
     "right_wrist_0_rgb": "observation/images/right_wrist",
 }
@@ -166,6 +166,14 @@ def rebase_actions(
     return rebased
 
 
+class GrippersLastToArmOrder:
+    """Reorder offline joint data from [L7, R7, Lgrip, Rgrip] to the wire layout."""
+
+    def __call__(self, data: dict) -> dict:
+        order = [*range(7), 14, *range(7, 14), 15]
+        return {**data, **{key: np.take(data[key], order, axis=-1) for key in ("observation/state", "actions")}}
+
+
 @dataclasses.dataclass(frozen=True)
 class G1DInputs:
     """Map canonical raw inputs to the model, retaining observation-relative actions.
@@ -180,6 +188,8 @@ class G1DInputs:
     action_dim: int = 16
     action_space: Literal["joint", "eef"] = "joint"
     eef_delta_frame: Literal["base", "tool"] = "base"
+
+    absolute_joint_targets: bool = False
 
     def __call__(self, data: dict) -> dict:
         state = np.asarray(data["observation/state"])
@@ -196,7 +206,11 @@ class G1DInputs:
         }
         if "actions" in data:
             actions = validate_actions(data["actions"], self.action_dim)
-            if state_sequence is not None:
+            if self.absolute_joint_targets:
+                actions = actions.copy()
+                actions[:, :7] -= inputs["state"][:7]
+                actions[:, 8:15] -= inputs["state"][8:15]
+            elif state_sequence is not None:
                 if self.action_space == "eef" and self.state_dim != 14:
                     references = data["observation/eef_state"]
                 else:

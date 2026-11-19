@@ -30,6 +30,19 @@ class G1DPolicyTest(unittest.TestCase):
                 np.testing.assert_array_equal(obs["actions"], actions)
                 self.assertEqual(set(output), {"actions"})
 
+    def test_absolute_joint_targets_share_one_anchor_after_marketdemo_reorder(self) -> None:
+        obs = self.observation(16)
+        state = obs["observation/state"].copy()
+        targets = np.stack([state + offset for offset in (2, 5, -1)])
+        obs["actions"] = targets.copy()
+        canonical = g1d_policy.GrippersLastToArmOrder()(obs)
+        result = g1d_policy.G1DInputs(absolute_joint_targets=True)(canonical)
+        np.testing.assert_array_equal(result["state"], state[[*range(7), 14, *range(7, 14), 15]])
+        joints = [*range(7), *range(8, 15)]
+        np.testing.assert_array_equal(result["actions"][:, joints], targets[:, :14] - state[:14])
+        np.testing.assert_array_equal(result["actions"][:, [7, 15]], targets[:, 14:])
+        np.testing.assert_array_equal(obs["actions"], targets)
+
     def test_joint_training_chunk_rebases_each_row_to_first_state(self) -> None:
         obs = self.observation(16)
         states = np.stack([np.full(16, value, dtype=np.float32) for value in (1, 2, 3)])
@@ -110,7 +123,7 @@ class G1DPolicyTest(unittest.TestCase):
         for image in (np.zeros((12, 16)), np.full((12, 16, 3), 255.0), np.full((12, 16, 3), np.nan)):
             with self.subTest(shape=image.shape), self.assertRaises(ValueError):
                 obs = self.observation(16)
-                obs["observation/images/head"] = image
+                obs["observation/images/high"] = image
                 g1d_policy.G1DInputs()(obs)
         obs = self.observation(16)
         del obs["observation/images/right_wrist"]

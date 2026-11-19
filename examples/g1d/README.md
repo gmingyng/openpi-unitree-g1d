@@ -1,6 +1,6 @@
 # G1-D 云端 WebSocket 推理
 
-OpenPI 只负责接收机器人通过 WebSocket 上传的绝对状态、RGB 图像和任务文本，运行模型并返回动作片段。相机驱动、状态采集、时间同步、IK、参考还原和动作执行均由机器人侧系统负责。
+OpenPI 只负责接收机器人通过 WebSocket 上传的绝对状态、RGB 图像和任务文本，运行模型并返回动作片段。相机驱动、状态采集、时间同步、IK 和动作执行均由机器人侧系统负责。
 
 | 文件 | 云端职责 |
 | --- | --- |
@@ -16,9 +16,9 @@ OpenPI 只负责接收机器人通过 WebSocket 上传的绝对状态、RGB 图�
 ```text
 机器人系统：采集状态/图像，组织观测
    ── WebSocket / MessagePack + NumPy ──→
-OpenPI：real_env 校验 → G1DInputs → 归一化 → 模型 → 反归一化 → G1DOutputs
+OpenPI：real_env 校验 → G1DInputs → 归一化 → 模型 → 反归一化 → G1DOutputs → Joint 加回本轮关节角
    ←── WebSocket / actions[H,D] ────────
-机器人系统：相对目标还原、动作缓冲、执行与反馈
+机器人系统：接收绝对关节目标、动作缓冲、执行与反馈
 ```
 
 请求示例：
@@ -26,7 +26,7 @@ OpenPI：real_env 校验 → G1DInputs → 归一化 → 模型 → 反归一化
 ```python
 observation = {
     "observation/state": state,                  # float32 [S]，绝对反馈
-    "observation/images/head": head_rgb,       # uint8 HWC RGB
+    "observation/images/high": head_rgb,       # uint8 HWC RGB
     "observation/images/left_wrist": left_rgb,   # uint8 HWC RGB
     "observation/images/right_wrist": right_rgb, # uint8 HWC RGB
     "prompt": "pick up the object",
@@ -39,10 +39,10 @@ OpenPI 不关注这些数据如何从设备读取，只检查约定字段、维�
 
 - Joint 默认 state/action 各16维：左臂7关节+夹爪、右臂7关节+夹爪。
 - EEF 默认 state/action 各14维：每臂xyz(3)+rotvec(3)+夹爪；也支持16维关节反馈作为模型state，动作仍14维。
-- 机械臂动作相对该次请求时的绝对参考，片段内使用同一参考；夹爪为绝对值。云端不累加、不加state、不执行动作。
+- Joint 云端逐步将模型 delta 加回同一个请求状态 s0，返回绝对关节目标和绝对夹爪目标。EEF 返回相对位姿和绝对夹爪目标。
 - EEF旋转/位置参考按训练配置的 `eef_delta_frame`；使用关节反馈作为模型state时，机器人侧根据同一时刻的实际EEF位姿还原目标，不必额外向云端上传执行用的EEF参考。
 
-连接后先发送 metadata，其中 `g1d` 公布维度、相机字段、`action_reference=request_observation_state`、`gripper_representation=absolute`、EEF坐标系等。其后一次请求对应一个动作片段响应，不包含执行确认或主动状态订阅。输入或推理错误沿用原 server 的文本错误帧和断开行为。
+连接后先发送 metadata，其中 `g1d` 公布维度、相机字段、`action_representation=absolute（Joint）或 relative（EEF）`、`gripper_representation=absolute`、EEF坐标系等。其后一次请求对应一个动作片段响应，不包含执行确认或主动状态订阅。输入或推理错误沿用原 server 的文本错误帧和断开行为。
 
 ## 启动
 
@@ -52,7 +52,7 @@ OpenPI 不关注这些数据如何从设备读取，只检查约定字段、维�
 uv run python -m examples.g1d.main --config pi05_g1d --checkpoint YOUR_CHECKPOINT --port 8000
 ```
 
-所选配置必须使用 `LeRobotG1DJointDataConfig` 或 `LeRobotG1DEEFDataConfig`，并已用真实数据训练得到匹配权重。当前 `pi05_g1d` 使用 EEF 工厂和本地数据/资产路径；需核对实际数据定义，并计算统计和训练得到匹配权重。
+所选配置必须使用 `LeRobotG1DJointDataConfig` 或 `LeRobotG1DEEFDataConfig`，并已用真实数据训练得到匹配权重。当前 `pi05_g1d` 使用 Joint 工厂和本地数据/资产路径；需核对实际数据定义，并计算统计和训练得到匹配权重。
 
 `main` 只接受推理服务启动参数：`--config`、`--checkpoint`、`--host`、`--port`、`--default-prompt`、`--pytorch-device`。不提供训练参数的命令行覆盖，也不在入口内重算或设置维度。
 
@@ -84,7 +84,7 @@ client = websocket_client_policy.WebsocketClientPolicy(host="SERVER_IP", port=80
 metadata = client.get_server_metadata()
 result = client.infer(observation)
 action_chunk = result["actions"]
-# 机器人侧系统按约定还原相对目标，处理夹爪和实际执行。
+# Joint 的 actions 已是绝对目标，机器人侧直接使用。
 ```
 
 现有客户端为同步请求响应；运行中超时重连、调度和断线处理沿用项目当前能力，本目录不实现机器人底层控制。`GET /healthz` 是原 server 的存活检查，不代表机器人状态或模型已预热。
@@ -95,4 +95,4 @@ action_chunk = result["actions"]
 python -m unittest openpi.policies.g1d_policy_test openpi.training.g1d_config_test examples.g1d.test_real_env examples.g1d.test_main -v
 ```
 
-覆盖云端不改变动作参考、Joint/EEF输入输出、训练片段重定位、默认prompt、元信息和原客户端多轮WebSocket收发。完整工厂测试需要训练依赖，缺少时显式跳过；尚未运行真实G1-D模型或实机。
+覆盖云端 Joint 固定参考还原、Joint/EEF输入输出、训练片段重定位、默认prompt、元信息和原客户端多轮WebSocket收发。完整工厂测试需要训练依赖，缺少时显式跳过；尚未运行真实G1-D模型或实机。

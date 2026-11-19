@@ -1,7 +1,9 @@
 from collections.abc import Iterator, Sequence
+import json
 import logging
 import multiprocessing
 import os
+from pathlib import Path
 import typing
 from typing import Literal, Protocol, SupportsIndex, TypeVar
 
@@ -137,7 +139,17 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    root = repo_id if repo_id.startswith("/") else None
+    root = repo_id if Path(repo_id).is_absolute() else None
+    if root is not None:
+        info_path = Path(root) / "meta/info.json"
+        if info_path.is_file():
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+            if info.get("codebase_version") == "v3.0":
+                from openpi.training.lerobot_v3_dataset import LocalLeRobotV3Dataset
+
+                return LocalLeRobotV3Dataset(
+                    Path(root), info, data_config.action_sequence_keys, action_horizon, data_config.prompt_from_task
+                )
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=root)
     dataset = lerobot_dataset.LeRobotDataset(
         repo_id,

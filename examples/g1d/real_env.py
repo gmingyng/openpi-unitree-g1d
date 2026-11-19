@@ -1,4 +1,4 @@
-"""G1-D cloud-side environment: network observations in, relative actions out.
+"""G1-D cloud-side environment: network observations in, joint targets or EEF deltas out.
 
 This adapter has no camera, robot SDK, state collector, IK or actuator interface.
 WebsocketPolicyServer calls infer() with the observation supplied by the robot.
@@ -6,6 +6,7 @@ WebsocketPolicyServer calls infer() with the observation supplied by the robot.
 
 from typing import Literal
 
+import numpy as np
 from openpi_client import base_policy
 
 from openpi.policies import g1d_policy
@@ -30,6 +31,9 @@ class G1DRealEnvironment(base_policy.BasePolicy):
             raise ValueError("Choose joint/eef action space and base/tool EEF delta frame")
         if min(state_dim, action_dim, action_horizon) <= 0:
             raise ValueError("State/action dimensions and action horizon must be positive")
+        if action_space == "joint" and (state_dim, action_dim) != (16, 16):
+            raise ValueError("Joint mode requires 16-D absolute joint and gripper vectors")
+        self._action_space = action_space
         self.action_dim = action_dim
         self.state_dim = state_dim
         self._policy = policy
@@ -47,8 +51,10 @@ class G1DRealEnvironment(base_policy.BasePolicy):
                 "action_space": action_space,
                 "action_dim": self.action_dim,
                 "action_horizon": action_horizon,
-                "action_reference": "request_observation_state",
+                "action_representation": "absolute" if action_space == "joint" else "relative",
+                "action_reference": None if action_space == "joint" else "request_observation_state",
                 "gripper_representation": "absolute",
+                **({"gripper_units": "motor_position"} if action_space == "joint" else {}),
                 "eef_delta_frame": eef_delta_frame if action_space == "eef" else None,
             },
         }
@@ -67,7 +73,11 @@ class G1DRealEnvironment(base_policy.BasePolicy):
         result["actions"] = g1d_policy.validate_actions(
             result["actions"], self.action_dim, horizon=self._horizon
         )
-        # No state addition, cumulative sum or hardware execution on the cloud.
+        if self._action_space == "joint":
+            reference = inputs["observation/state"]
+            result["actions"] = np.stack([
+                g1d_policy.absolute_target(row, reference, "joint") for row in result["actions"]
+            ])
         return result
 
     def reset(self) -> None:

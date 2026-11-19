@@ -51,7 +51,7 @@ class MainTest(unittest.TestCase):
 
 
 class WebsocketTest(unittest.IsolatedAsyncioTestCase):
-    async def test_stock_client_receives_metadata_and_relative_chunks(self) -> None:
+    async def test_stock_client_receives_metadata_and_absolute_joint_chunks(self) -> None:
         env = environment(RecordingPolicy())
         handler = WebsocketPolicyServer(env, metadata=env.metadata)
         async with websockets.asyncio.server.serve(handler._handler, "127.0.0.1", 0) as server:
@@ -66,7 +66,9 @@ class WebsocketTest(unittest.IsolatedAsyncioTestCase):
                         obs["observation/state"][:] = state_value
                         result = client.infer(obs)
                         self.assertEqual(result["actions"].shape, (2, 16))
-                        np.testing.assert_allclose(result["actions"], 0.1)
+                        np.testing.assert_allclose(result["actions"][:, :7], state_value + 0.1)
+                        np.testing.assert_allclose(result["actions"][:, 8:15], state_value + 0.1)
+                        np.testing.assert_allclose(result["actions"][:, [7, 15]], 0.1)
                         self.assertIn("infer_ms", result["server_timing"])
                 finally:
                     client._ws.close()

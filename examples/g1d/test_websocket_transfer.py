@@ -23,7 +23,7 @@ def make_observation(contract: dict) -> dict:
     rng = np.random.default_rng(42)
     images = {
         f"observation/images/{camera}": rng.integers(256, size=(224, 224, 3), dtype=np.uint8)
-        for camera in ("head", "left_wrist", "right_wrist")
+        for camera in ("high", "left_wrist", "right_wrist")
     }
     if set(images) != set(contract["image_keys"]):
         raise ValueError(f"Unexpected camera keys {contract['image_keys']}")
@@ -86,7 +86,7 @@ def serve_ones(host: str, port: int, legacy_12: bool = False) -> None:
     from examples.g1d.real_env import G1DRealEnvironment
     from openpi.serving.websocket_policy_server import WebsocketPolicyServer
 
-    dim = 12 if legacy_12 else 14
+    dim = 12 if legacy_12 else 16
     state_key = "state" if legacy_12 else "observation/state"
     cameras = ("head", "left_wrist", "right_wrist")
     image_keys = cameras if legacy_12 else ("observation/images/high", "observation/images/left_wrist",
@@ -102,7 +102,7 @@ def serve_ones(host: str, port: int, legacy_12: bool = False) -> None:
                 raise ValueError(f"Expected {state_key!r}; received keys {list(obs)}")
             state = np.asarray(obs[state_key])
             if state.shape != (dim,) or state.dtype != np.float32 or not np.isfinite(state).all():
-                raise ValueError(f"Expected finite float32 EEF state[{dim}], got {state.shape} {state.dtype}")
+                raise ValueError(f"Expected finite float32 state[{dim}], got {state.shape} {state.dtype}")
             values = state.astype(np.float64)
             inputs = {"observation/state": ((values - values.mean()) / max(values.std(), 1e-6)).astype(np.float32),
                       "prompt": obs.get("prompt")}
@@ -111,11 +111,15 @@ def serve_ones(host: str, port: int, legacy_12: bool = False) -> None:
                 image = images[wire_key]
                 if np.shape(image) != (224, 224, 3):
                     raise ValueError(f"Unexpected {camera} image shape")
-                inputs[f"observation/images/{camera}"] = image
-            return {**super().infer(inputs), "observation_id": obs["_unitree"]["sequence"]}
+                canonical = "high" if camera == "head" else camera
+                inputs[f"observation/images/{canonical}"] = image
+            result = super().infer(inputs)
+            # The transport probe promises a constant wire response in both modes.
+            result["actions"].fill(1)
+            return {**result, "observation_id": obs["_unitree"]["sequence"]}
 
     env = RobotTestEnvironment(
-        OnesPolicy(), action_space="eef", state_dim=dim, action_dim=dim,
+        OnesPolicy(), action_space="eef" if legacy_12 else "joint", state_dim=dim, action_dim=dim,
         action_horizon=10, metadata={"test_response": "ones"},
     )
     env.metadata["g1d"].update(protocol="unitree-test-v1", state_key=state_key, image_container_key="images" if legacy_12 else None,

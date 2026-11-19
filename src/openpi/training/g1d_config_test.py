@@ -29,17 +29,17 @@ class G1DDataConfigTest(unittest.TestCase):
                     mock.patch.object(config.ModelTransformFactory, "__call__", return_value=transforms.Group()),
                 ):
                     data_config = factory.create(pathlib.Path(directory), pi0_config.Pi0Config(pi05=True))
-                self.assertEqual(data_config.action_sequence_keys, ("control.delta", "observation.state"))
+                self.assertEqual(data_config.action_sequence_keys, ("control.delta",) if dim == 16 else ("control.delta", "observation.state"))
                 self.assertTrue(data_config.prompt_from_task)
                 self.assertTrue(data_config.use_quantile_norm)
                 actions = np.full((3, dim), 0.02, dtype=np.float32)
                 sample = {
-                    "observation.state": np.zeros((3, dim), dtype=np.float32),
+                    "observation.state": np.zeros(dim if dim == 16 else (3, dim), dtype=np.float32),
                     "control.delta": actions.copy(),
                     "prompt": "task",
                     **{
                         f"observation.images.{camera}": np.zeros((3, 12, 16), dtype=np.float32)
-                        for camera in ("head", "left_wrist", "right_wrist")
+                        for camera in ("cam_left_high", "left_wrist", "right_wrist")
                     },
                 }
                 model_input = transforms.compose(
