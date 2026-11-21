@@ -765,7 +765,11 @@ _CONFIGS = [
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
         weight_loader=weight_loaders.CheckpointWeightLoader("/home/mingyang/openpi/checkpoints/pi05_base/params"),
         
-        batch_size = 16,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size = 32,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
         num_workers = 2,
