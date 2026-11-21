@@ -25,7 +25,7 @@ while true; do
     setsid uv run scripts/train.py pi05_g1d --exp-name=shelf_pp_test --resume 9>&- &
     trainer=$!
     while true; do
-        sleep 3600 9>&- &
+        sleep 1800 9>&- &
         timer=$!
         wait "$timer"
         timer=
