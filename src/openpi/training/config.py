@@ -763,6 +763,15 @@ _CONFIGS = [
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        
+        batch_size = 32
+        # Number of workers to use for the data loader. Increasing this number will speed up data loading but
+        # will increase memory and CPU usage.
+        num_workers = 2
+        log_interval = 100
+        save_interval = 1000
+        keep_period = 5000
+        
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
         num_train_steps=30_000,
