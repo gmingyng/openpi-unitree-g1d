@@ -769,7 +769,7 @@ _CONFIGS = [
             pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
         ).get_freeze_filter(),
         ema_decay=None,
-        batch_size = 32,
+        batch_size = 16,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
         num_workers = 2,
