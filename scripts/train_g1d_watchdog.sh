@@ -3,6 +3,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 export WANDB_MODE=offline XLA_PYTHON_CLIENT_MEM_FRACTION=0.92 PYTHONUNBUFFERED=1
+export PYTHONWARNINGS="${PYTHONWARNINGS:+$PYTHONWARNINGS,}ignore:The video decoding and encoding capabilities of torchvision are deprecated:UserWarning:torchvision.io._video_deprecation_warning"
 exec 9>.g1d_shelf_pp_test.lock
 flock -n 9 || { echo "Another shelf_pp_test watchdog is running." >&2; exit 1; }
 
