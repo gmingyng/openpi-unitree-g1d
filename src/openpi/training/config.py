@@ -772,7 +772,7 @@ _CONFIGS = [
         batch_size = 16,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
-        num_workers = 2,
+        num_workers = 0,
         log_interval = 100,
         save_interval = 1000,
         keep_period = 5000,

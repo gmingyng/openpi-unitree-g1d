@@ -41,8 +41,8 @@ def initialize_checkpoint_dir(
         checkpoint_dir,
         item_handlers={
             "assets": CallbackHandler(),
-            "train_state": ocp.PyTreeCheckpointHandler(),
-            "params": ocp.PyTreeCheckpointHandler(),
+            "train_state": ocp.PyTreeCheckpointHandler(save_concurrent_gb=3),
+            "params": ocp.PyTreeCheckpointHandler(save_concurrent_gb=5),
         },
         options=ocp.CheckpointManagerOptions(
             max_to_keep=1,
