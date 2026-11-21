@@ -230,8 +230,9 @@ class SimpleDataConfig(DataConfigFactory):
 @dataclasses.dataclass(frozen=True)
 class _LeRobotG1DDataConfig(DataConfigFactory):
     """Map stored G1-D actions to a chunk anchored at the request observation."""
-
+    # 数据集 action 保存的是否绝对关节目标角
     absolute_joint_targets: bool = False
+    #原始数据是否是 [左臂7, 右臂7, 左夹爪, 右夹爪]
     grippers_last: bool = False
     state_dim: int = 16
     action_dim: tyro.conf.Suppress[int] = 16
@@ -744,15 +745,17 @@ _CONFIGS = [
         # Here you define the model config -- In this example we use pi0 as the model
         # architecture and perform *full* finetuning. in the examples below we show how to modify
         # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=10),
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=25,
+                                   paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
         # Here you define the dataset you are training on. In this example we use the Libero
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotG1DJointDataConfig(
-            repo_id=os.environ.get("G1D_DATASET_ROOT", str(
-                pathlib.Path(__file__).resolve().parents[4] / "datasets/MarketDemo/g1d_pick_place_controller_dex1_v1"
-            )),
-            assets=AssetsConfig(asset_id="marketdemo_g1d_chunk_joint"),
+            repo_id="/home/mingyang/datasets/lerobot_shelf_pick_place_v1",
+            assets=AssetsConfig(
+                assets_dir="/home/mingyang/openpi/assets/pi05_g1d",
+                asset_id="shelf_pp_v1_chunk_delta_joint",
+            ),
             grippers_last=True,
             head_image_key="observation.images.cam_left_high",
             left_wrist_image_key="observation.images.cam_left_wrist",
@@ -760,7 +763,20 @@ _CONFIGS = [
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/mingyang/openpi/checkpoints/pi05_base/params"),
+        
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True, paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size = 16,
+        # Number of workers to use for the data loader. Increasing this number will speed up data loading but
+        # will increase memory and CPU usage.
+        num_workers = 2,
+        log_interval = 100,
+        save_interval = 1000,
+        keep_period = 5000,
+        
         # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
         # Check the base TrainConfig class for a full list of available hyperparameters.
         num_train_steps=30_000,
