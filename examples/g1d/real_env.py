@@ -31,7 +31,7 @@ class G1DRealEnvironment(base_policy.BasePolicy):
             raise ValueError("Choose joint/eef action space and base/tool EEF delta frame")
         if min(state_dim, action_dim, action_horizon) <= 0:
             raise ValueError("State/action dimensions and action horizon must be positive")
-        if action_space == "joint" and (state_dim, action_dim) != (16, 16):
+        if action_space == "joint" and (state_dim, action_dim) not in ((16, 16), (17, 16)):
             raise ValueError("Joint mode requires 16-D absolute joint and gripper vectors")
         self._action_space = action_space
         self.action_dim = action_dim
@@ -63,6 +63,8 @@ class G1DRealEnvironment(base_policy.BasePolicy):
         if not isinstance(obs, dict):
             raise ValueError("Observation must be a dictionary")
         inputs = {"observation/state": g1d_policy.validate_state(obs["observation/state"], self.state_dim)}
+        if self._action_space == "joint" and self.state_dim == 17 and inputs["observation/state"][0] not in (0, 1):
+            raise ValueError("state[0] must be a binary scan_success flag")
         for key in g1d_policy.CAMERA_KEYS.values():
             inputs[key] = g1d_policy.parse_rgb_image(obs[key], wire_format=True)
         prompt = obs.get("prompt", self._default_prompt)
@@ -74,7 +76,7 @@ class G1DRealEnvironment(base_policy.BasePolicy):
             result["actions"], self.action_dim, horizon=self._horizon
         )
         if self._action_space == "joint":
-            reference = inputs["observation/state"]
+            reference = inputs["observation/state"][-16:]
             result["actions"] = np.stack([
                 g1d_policy.absolute_target(row, reference, "joint") for row in result["actions"]
             ])

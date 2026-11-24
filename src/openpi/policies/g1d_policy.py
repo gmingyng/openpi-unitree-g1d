@@ -171,7 +171,9 @@ class GrippersLastToArmOrder:
 
     def __call__(self, data: dict) -> dict:
         order = [*range(7), 14, *range(7, 14), 15]
-        return {**data, **{key: np.take(data[key], order, axis=-1) for key in ("observation/state", "actions")}}
+        state = np.asarray(data["observation/state"])
+        state_order = [0, *(i + 1 for i in order)] if state.shape[-1] == 17 else order
+        return {**data, "observation/state": state[..., state_order], "actions": np.take(data["actions"], order, axis=-1)}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -204,17 +206,23 @@ class G1DInputs:
             "image": {dest: parse_rgb_image(data[source]) for dest, source in CAMERA_KEYS.items()},
             "image_mask": {dest: np.True_ for dest in CAMERA_KEYS},
         }
+        scan_state = self.action_space == "joint" and self.state_dim == 17
+        if scan_state and inputs["state"][0] not in (0, 1):
+            raise ValueError("scan_success must be 0 or 1")
+        if scan_state:
+            inputs["scan_success"] = inputs["state"][0]
+        joints = inputs["state"][1:] if scan_state else inputs["state"]
         if "actions" in data:
             actions = validate_actions(data["actions"], self.action_dim)
             if self.absolute_joint_targets:
                 actions = actions.copy()
-                actions[:, :7] -= inputs["state"][:7]
-                actions[:, 8:15] -= inputs["state"][8:15]
+                actions[:, :7] -= joints[:7]
+                actions[:, 8:15] -= joints[8:15]
             elif state_sequence is not None:
                 if self.action_space == "eef" and self.state_dim != 14:
                     references = data["observation/eef_state"]
                 else:
-                    references = state_sequence
+                    references = state_sequence[:, 1:] if scan_state else state_sequence
                 actions = rebase_actions(
                     actions, references, self.action_space, eef_delta_frame=self.eef_delta_frame
                 )
@@ -222,6 +230,16 @@ class G1DInputs:
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
         return inputs
+
+
+class RestoreScanFlag:
+    """Keep the binary state channel independent of empirical quantiles before tokenization."""
+
+    def __call__(self, data: dict) -> dict:
+        data = dict(data)
+        state = data["state"].copy()
+        state[0] = data.pop("scan_success")
+        return {**data, "state": state}
 
 
 @dataclasses.dataclass(frozen=True)

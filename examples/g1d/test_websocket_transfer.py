@@ -15,6 +15,8 @@ def make_observation(contract: dict) -> dict:
     joint[[7, 15]] = eef[[6, 13]] = [0.25, 0.75]
     if contract["state_dim"] == joint.size:
         state, extra_key, extra = joint, "observation/eef_state", eef
+    elif contract["state_dim"] == 17:
+        state, extra_key, extra = np.r_[np.float32(1), joint], "observation/eef_state", eef
     elif contract["state_dim"] == eef.size:
         state, extra_key, extra = eef, "observation/joint_state", joint
     else:

@@ -259,7 +259,7 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
             "observation/images/right_wrist": self.right_wrist_image_key,
             "actions": self.action_key,
         }
-        if (self.absolute_joint_targets or self.grippers_last) and (self.action_space != "joint" or self.state_dim != 16):
+        if (self.absolute_joint_targets or self.grippers_last) and (self.action_space != "joint" or self.state_dim not in (16, 17)):
             raise ValueError("Absolute joint targets and grippers-last layout require 16-D joint feedback")
         repack = [_transforms.RepackTransform(structure)]
         if self.grippers_last:
@@ -274,6 +274,11 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
             sequence_keys.append(self.eef_state_key)
         if self.prompt_from_task:
             structure["prompt"] = "prompt"
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+        if self.action_space == "joint" and self.state_dim == 17:
+            model_transforms = dataclasses.replace(
+                model_transforms, inputs=(g1d_policy.RestoreScanFlag(), *model_transforms.inputs)
+            )
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=_transforms.Group(inputs=repack),
@@ -289,7 +294,7 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
                 ],
                 outputs=[g1d_policy.G1DOutputs(action_dim=self.action_dim)],
             ),
-            model_transforms=ModelTransformFactory(default_prompt=self.default_prompt)(model_config),
+            model_transforms=model_transforms,
             action_sequence_keys=tuple(dict.fromkeys(sequence_keys)),
             prompt_from_task=self.prompt_from_task,
         )
@@ -782,6 +787,44 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
 
+    TrainConfig(
+        # Change the name to reflect your model and dataset.
+        name="pi05_g1d_full",
+        # Here you define the model config -- In this example we use pi0 as the model
+        # architecture and perform *full* finetuning. in the examples below we show how to modify
+        # this to perform *low-memory* (LORA) finetuning and use pi0-FAST as an alternative architecture.
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=25),
+        # Here you define the dataset you are training on. In this example we use the Libero
+        # dataset. For your own dataset, you can change the repo_id to point to your dataset.
+        # Also modify the DataConfig to use the new config you made for your dataset above.
+        data=LeRobotG1DJointDataConfig(
+            repo_id="/home/mingyang/datasets/scan_demo_v1",
+            assets=AssetsConfig(
+                assets_dir="/home/mingyang/openpi/assets/pi05_g1d",
+                asset_id="shelf_pp_v1_chunk_delta_joint",
+            ),
+            grippers_last=True,
+            head_image_key="observation.images.cam_left_high",
+            left_wrist_image_key="observation.images.cam_left_wrist",
+            right_wrist_image_key="observation.images.cam_right_wrist",
+        ),
+        # Here you define which pre-trained checkpoint you want to load to initialize the model.
+        # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
+        weight_loader=weight_loaders.CheckpointWeightLoader("/home/mingyang/openpi/checkpoints/pi05_base/params"),
+        
+        ema_decay=0.99,
+        batch_size = 64,
+        # Number of workers to use for the data loader. Increasing this number will speed up data loading but
+        # will increase memory and CPU usage.
+        num_workers = 2,
+        log_interval = 100,
+        save_interval = 1000,
+        keep_period = 5000,
+        
+        # Below you can define other hyperparameters like the learning rate, number of training steps, etc.
+        # Check the base TrainConfig class for a full list of available hyperparameters.
+        num_train_steps=30_000,
+    ),
 
     TrainConfig(
         # Change the name to reflect your model and dataset.
@@ -1104,6 +1147,18 @@ _CONFIGS = [
     *roboarena_config.get_roboarena_configs(),
     *polaris_config.get_polaris_configs(),
 ]
+
+_g1d = next(cfg for cfg in _CONFIGS if cfg.name == "pi05_g1d")
+_CONFIGS.append(dataclasses.replace(
+    _g1d,
+    name="pi05_g1d_scan",
+    data=dataclasses.replace(
+        _g1d.data,
+        state_dim=17,
+        repo_id="/home/mingyang/datasets/lerobot_can_scan_v1",
+        assets=AssetsConfig(assets_dir="/home/mingyang/openpi/assets/pi05_g1d_scan", asset_id="can_scan_delta_joint"),
+    ),
+))
 
 if len({config.name for config in _CONFIGS}) != len(_CONFIGS):
     raise ValueError("Config names must be unique.")

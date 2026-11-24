@@ -75,6 +75,64 @@ uv run python -m examples.g1d.main --config pi05_g1d --checkpoint YOUR_CHECKPOIN
 $env:PYTHONPATH = "$PWD\src;$PWD\packages\openpi-client\src;$PWD"
 ```
 
+## 4090 与宇树 G1-D 双端实测
+
+### 1. 在 4090 上启动检查点服务
+
+登录服务器后运行以下命令。测试和执行共用同一个服务，均保留 π0.5 完整的 **10 步采样**。该检查点每轮返回 25 帧绝对关节和夹爪目标。
+
+XLA_PYTHON_CLIENT_PREALLOCATE=false
+```bash
+cd ~/openpi
+XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run -m examples.g1d.main \
+  --config pi05_g1d \
+  --checkpoint "$PWD/checkpoints/pi05_g1d/shelf_pp_test/25000" \
+  --host 192.168.66.200 --port 8000
+```
+
+### 2. 在机器人上测试通信和预热延迟
+
+从另一终端登录机器人：
+
+```bash
+ssh unitree@192.168.66.47
+```
+
+在机器人终端运行以下命令。测试默认只打印预测。第一次请求用于预热，随后 20 次的 `inference round trip` 可用于统计中位数和 P95。
+
+Pick the green bottle from the shelf and place it at the fixed target.
+Pick the blue bottle from the shelf and place it at the fixed target.
+
+source ~/miniconda3/etc/profile.d/conda.sh
+```bash
+conda activate tv
+cd ~/zhoumy/xr_teleoperate
+POLICY_URL=ws://192.168.66.200:8000
+PROMPT="Pick the green bottle from the shelf and place it at the fixed target."
+
+python unitree_openpi/scripts/test_g1d_client.py \
+  --url "$POLICY_URL" --prompt "$PROMPT" --max-steps 20
+```
+
+可选任务文本：上面的英文是已用于链路实测的示例。可将 `PROMPT` 替换为训练数据中对应任务的原文。仅检查通信时也可用 `PROMPT="test"`；测试脚本省略 `--prompt` 时默认使用 `test`。
+
+### 3. 在机器人上执行一次策略响应
+
+**先核对夹爪单位和端点。** 此检查点此前输出过约 2.6 和 5.4 的夹爪目标，超过机器人当前配置的 0–2.3。客户端会拒绝下发越界目标。确认模型输出与真实设备量程匹配后，在上一步的机器人终端运行：
+
+```bash
+python unitree_openpi/scripts/run_g1d_client.py \
+  --url "$POLICY_URL" --prompt "$PROMPT" --max-steps 1 --execute
+```
+
+`--max-steps 1` 限制为一轮推理；机器人配置中的 `execute_steps` 决定这一轮采用多少帧，当前为 1。去掉 `--execute` 可用相同入口只打印目标。
+
+### 4. 保留 10 步采样时的通信优化
+
+4090 与机器人 Wi-Fi 的一次实测中，重复发送同一份真实观测，预热后 20 轮往返中位数为 **127.8 ms**，其中服务端策略调用为 **103.9 ms**，外围耗时约 **24 ms**。机器人打包约 0.32 ms、解包约 0.12 ms。三张 RGB 图像的原始数据共 451,584 字节，动作回复约 1.7 KB。这组数据不包含等待相机新帧的时间。
+
+优先比较 Wi-Fi 和千兆有线：保持同一检查点、三路图像、prompt 和采样步数，分别记录预热后的往返和服务端计时。在 Wi-Fi 上还可对比两端配套的无损图像压缩，把编码、传输和解码全部计入往返，并核对解码后的像素。以当前基线，即使消除全部通信与解包耗时，服务端策略调用本身仍超过 80 ms。
+
 ## 机器人侧使用原客户端
 
 ```python
@@ -95,4 +153,4 @@ action_chunk = result["actions"]
 python -m unittest openpi.policies.g1d_policy_test openpi.training.g1d_config_test examples.g1d.test_real_env examples.g1d.test_main -v
 ```
 
-覆盖云端 Joint 固定参考还原、Joint/EEF输入输出、训练片段重定位、默认prompt、元信息和原客户端多轮WebSocket收发。完整工厂测试需要训练依赖，缺少时显式跳过；尚未运行真实G1-D模型或实机。
+覆盖云端 Joint 固定参考还原、Joint/EEF输入输出、训练片段重定位、默认prompt、元信息和原客户端多轮WebSocket收发。完整工厂测试需要训练依赖，缺少时显式跳过。双端实测步骤见上文。
