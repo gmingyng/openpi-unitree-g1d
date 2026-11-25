@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Keep the shelf_pp_test training run alive. Run on Linux; Ctrl-C stops supervision.
+# Keep the g1d_scan_v1_full training run alive. Run on Linux; Ctrl-C stops supervision.
 set -eu
 cd "$(dirname "$0")/.."
-export WANDB_MODE=offline XLA_PYTHON_CLIENT_MEM_FRACTION=0.92 PYTHONUNBUFFERED=1
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 WANDB_MODE=offline XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 PYTHONUNBUFFERED=1
 export PYTHONWARNINGS="${PYTHONWARNINGS:+$PYTHONWARNINGS,}ignore:The video decoding and encoding capabilities of torchvision are deprecated:UserWarning:torchvision.io._video_deprecation_warning"
-exec 9>.g1d_shelf_pp_test.lock
-flock -n 9 || { echo "Another shelf_pp_test watchdog is running." >&2; exit 1; }
+exec 9>.g1d_scan_v1_full.lock
+flock -n 9 || { echo "Another g1d_scan_v1_full watchdog is running." >&2; exit 1; }
 
 trainer=
 timer=
@@ -21,8 +21,8 @@ stop() {
 trap stop INT TERM HUP
 
 while true; do
-    printf '[%s] Starting pi05_g1d shelf_pp_test with --resume\n' "$(date -Is)"
-    setsid uv run scripts/train.py pi05_g1d --exp-name=shelf_pp_test --resume 9>&- &
+    printf '[%s] Starting pi05_g1d_full g1d_scan_v1_full with --resume\n' "$(date -Is)"
+    setsid uv run --no-sync scripts/train.py pi05_g1d_full --exp-name=g1d_scan_v1_full --resume 9>&- &
     trainer=$!
     while true; do
         sleep 1800 9>&- &
