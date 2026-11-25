@@ -819,7 +819,7 @@ _CONFIGS = [
         fsdp_devices = 8,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
-        num_workers = 12,
+        num_workers = 6,
         log_interval = 100,
         save_interval = 1000,
         keep_period = 5000,
