@@ -234,6 +234,7 @@ class _LeRobotG1DDataConfig(DataConfigFactory):
     absolute_joint_targets: bool = False
     #原始数据是否是 [左臂7, 右臂7, 左夹爪, 右夹爪]
     grippers_last: bool = False
+    # In joint space, 17 selects [scan_success, 16 joint and gripper values].
     state_dim: int = 16
     action_dim: tyro.conf.Suppress[int] = 16
     action_space: tyro.conf.Suppress[Literal["joint", "eef"]] = "joint"
@@ -798,10 +799,11 @@ _CONFIGS = [
         # dataset. For your own dataset, you can change the repo_id to point to your dataset.
         # Also modify the DataConfig to use the new config you made for your dataset above.
         data=LeRobotG1DJointDataConfig(
-            repo_id="/home/mingyang/datasets/scan_demo_v1",
+            repo_id="/data/disk40G/zhoumy/datasets/lerobot_scan_demo_v1",
+            state_dim=17,
             assets=AssetsConfig(
-                assets_dir="/home/mingyang/openpi/assets/pi05_g1d",
-                asset_id="shelf_pp_v1_chunk_delta_joint",
+                assets_dir="/data/disk40G/zhoumy/openpi/assets/pi05_g1d",
+                asset_id="scan_demo_v1_chunk_delta_joint",
             ),
             grippers_last=True,
             head_image_key="observation.images.cam_left_high",
@@ -810,13 +812,14 @@ _CONFIGS = [
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
-        weight_loader=weight_loaders.CheckpointWeightLoader("/home/mingyang/openpi/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/disk40G/zhoumy/checkpoints/pi05_base/params"),
         
         ema_decay=0.99,
-        batch_size = 64,
+        batch_size = 128,
+        fsdp_devices = 4,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
-        num_workers = 2,
+        num_workers = 8,
         log_interval = 100,
         save_interval = 1000,
         keep_period = 5000,
