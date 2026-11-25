@@ -812,7 +812,7 @@ _CONFIGS = [
         ),
         # Here you define which pre-trained checkpoint you want to load to initialize the model.
         # This should match the model config you chose above -- i.e. in this case we use the pi0 base model.
-        weight_loader=weight_loaders.CheckpointWeightLoader("/data/disk40G/zhoumy/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("/data/disk40G/zhoumy/openpi/checkpoints/pi05_base/params"),
         
         ema_decay=0.99,
         batch_size = 128,
