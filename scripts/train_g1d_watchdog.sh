@@ -2,7 +2,7 @@
 # Keep the g1d_scan_v1_full training run alive. Run on Linux; Ctrl-C stops supervision.
 set -eu
 cd "$(dirname "$0")/.."
-export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 WANDB_MODE=offline XLA_PYTHON_CLIENT_MEM_FRACTION=0.95 PYTHONUNBUFFERED=1
+export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 WANDB_MODE=offline XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 PYTHONUNBUFFERED=1
 export PYTHONWARNINGS="${PYTHONWARNINGS:+$PYTHONWARNINGS,}ignore:The video decoding and encoding capabilities of torchvision are deprecated:UserWarning:torchvision.io._video_deprecation_warning"
 exec 9>.g1d_scan_v1_full.lock
 flock -n 9 || { echo "Another g1d_scan_v1_full watchdog is running." >&2; exit 1; }
