@@ -220,6 +220,8 @@ class Pi0(_model.BaseModel):
         observation: _model.Observation,
         *,
         num_steps: int | at.Int[at.Array, ""] = 10,
+        rtc_prefix=None,
+        rtc_weights=None,
         noise: at.Float[at.Array, "b ah ad"] | None = None,
     ) -> _model.Actions:
         observation = _model.preprocess_observation(None, observation, train=False)
@@ -236,8 +238,7 @@ class Pi0(_model.BaseModel):
         positions = jnp.cumsum(prefix_mask, axis=1) - 1
         _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
 
-        def step(carry):
-            x_t, time = carry
+        def velocity(x_t, time):
             suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
                 observation, x_t, jnp.broadcast_to(time, batch_size)
             )
@@ -266,8 +267,21 @@ class Pi0(_model.BaseModel):
                 adarms_cond=[None, adarms_cond],
             )
             assert prefix_out is None
-            v_t = self.action_out_proj(suffix_out[:, -self.action_horizon :])
+            return self.action_out_proj(suffix_out[:, -self.action_horizon :])
 
+        def step(carry):
+            x_t, time = carry
+            if rtc_prefix is None:
+                v_t = velocity(x_t, time)
+            else:
+                def predict_clean(x):
+                    v = velocity(x, time)
+                    return x - time * v, v
+
+                clean, pullback, v_t = jax.vjp(predict_clean, x_t, has_aux=True)
+                residual = rtc_weights * (rtc_prefix - clean)
+                gain = jnp.minimum(5.0, (time**2 + (1-time)**2) / jnp.maximum(time*(1-time), 1e-8))
+                v_t = v_t - gain * pullback(residual)[0]
             return x_t + dt * v_t, time + dt
 
         def cond(carry):

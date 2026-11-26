@@ -45,7 +45,7 @@ class MainTest(unittest.TestCase):
             mock.patch.object(main.websocket_policy_server, "WebsocketPolicyServer") as server,
         ):
             main.main(args)
-        load.assert_called_once_with("my_g1d", "/checkpoint", default_prompt="task", pytorch_device="cuda:0")
+        load.assert_called_once_with("my_g1d", "/checkpoint", default_prompt="task", pytorch_device="cuda:0", rtc=False)
         server.assert_called_once_with(policy=env, host="0.0.0.0", port=9000, metadata=env.metadata)
         server.return_value.serve_forever.assert_called_once()
 

@@ -54,7 +54,16 @@ uv run python -m examples.g1d.main --config pi05_g1d --checkpoint YOUR_CHECKPOIN
 
 所选配置必须使用 `LeRobotG1DJointDataConfig` 或 `LeRobotG1DEEFDataConfig`，并已用真实数据训练得到匹配权重。当前 `pi05_g1d` 使用 Joint 工厂和本地数据/资产路径；需核对实际数据定义，并计算统计和训练得到匹配权重。
 
-`main` 只接受推理服务启动参数：`--config`、`--checkpoint`、`--host`、`--port`、`--default-prompt`、`--pytorch-device`。不提供训练参数的命令行覆盖，也不在入口内重算或设置维度。
+启动命令加上 `--rtc` 可启用实时片段衔接（Real-Time Chunking）。客户端可以读取 `metadata["g1d"]["rtc"]` 确认服务能力。首次请求照常发送观测。后续重规划时，在采集观测的同一控制步截取旧计划尚未执行的部分，随观测一起发送：
+
+```python
+# Joint 示例：旧计划还剩 10 行，预计推理往返耗时 7 个控制步
+observation["rtc_prefix"] = old_actions[next_index:next_index + 10]
+observation["rtc_delay"] = 7
+result = client.infer(observation)  # 在独立于控制循环的推理线程调用
+```
+
+`rtc_prefix` 形状为 `[K,D]`，要求 `0 <= rtc_delay <= K <= H` 且 `K > 0`。Joint 直接传绝对目标。EEF 客户端需先把旧目标换算到**本次观测的末端位姿**，沿用配置的 `eef_delta_frame` 和绝对夹爪值。模型采样时对延迟覆盖的行使用全权重，对剩余重叠行逐步减弱引导。等待回复时控制循环继续执行旧计划。若回复到达时已过去 `n` 个控制步，从新片段的第 `n` 行（从 0 开始）接续；若 `n >= H`，丢弃过期片段并重新请求。
 
 `real_env.create_environment()` 根据配置名加载训练配置和策略，并直接从配置构造网络契约：
 

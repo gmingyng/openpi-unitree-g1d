@@ -65,10 +65,13 @@ class Policy(BasePolicy):
             self._rng = rng or jax.random.key(0)
 
     @override
-    def infer(self, obs: dict, *, noise: np.ndarray | None = None) -> dict:  # type: ignore[misc]
+    def infer(self, obs: dict, *, noise: np.ndarray | None = None, rtc_weights: np.ndarray | None = None) -> dict:  # type: ignore[misc]
         # Make a copy since transformations may modify the inputs in place.
         inputs = jax.tree.map(lambda x: x, obs)
         inputs = self._input_transform(inputs)
+        if rtc_weights is not None:
+            padding = inputs["actions"].shape[-1] - rtc_weights.shape[-1]
+            inputs["rtc_weights"] = np.pad(rtc_weights, ((0, 0), (0, padding)))
         if not self._is_pytorch_model:
             # Make a batch and convert to jax.Array.
             inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
@@ -80,6 +83,9 @@ class Policy(BasePolicy):
 
         # Prepare kwargs for sample_actions
         sample_kwargs = dict(self._sample_kwargs)
+        if rtc_weights is not None:
+            sample_kwargs["rtc_prefix"] = inputs.pop("actions")
+            sample_kwargs["rtc_weights"] = inputs.pop("rtc_weights")
         if noise is not None:
             noise = torch.from_numpy(noise).to(self._pytorch_device) if self._is_pytorch_model else jnp.asarray(noise)
 

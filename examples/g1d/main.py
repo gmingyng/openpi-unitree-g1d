@@ -16,6 +16,7 @@ class Args:
     port: int = 8000
     default_prompt: str | None = None
     pytorch_device: str | None = None
+    rtc: bool = False
 
 
 def main(args: Args) -> None:
@@ -26,6 +27,7 @@ def main(args: Args) -> None:
         args.checkpoint,
         default_prompt=args.default_prompt,
         pytorch_device=args.pytorch_device,
+        rtc=args.rtc,
     )
     logging.info("G1-D server listening on %s:%s", args.host, args.port)
     websocket_policy_server.WebsocketPolicyServer(
@@ -41,6 +43,7 @@ def parse_args(argv: list[str] | None = None) -> Args:
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--default-prompt")
     parser.add_argument("--pytorch-device")
+    parser.add_argument("--rtc", action="store_true", help="Enable real-time chunk conditioning")
     return Args(**vars(parser.parse_args(argv)))
 
 

@@ -815,11 +815,11 @@ _CONFIGS = [
         weight_loader=weight_loaders.CheckpointWeightLoader("/data/disk40G/zhoumy/openpi/checkpoints/pi05_base/params"),
         
         ema_decay=0.99,
-        batch_size = 256,
-        fsdp_devices = 8,
+        batch_size = 192,
+        fsdp_devices = 4,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
-        num_workers = 4,
+        num_workers = 2,
         log_interval = 100,
         save_interval = 500,
         keep_period = 5000,

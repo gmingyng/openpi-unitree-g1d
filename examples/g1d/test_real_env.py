@@ -45,6 +45,29 @@ def environment(policy, *, action_space="joint", state_dim=None, action_horizon=
 
 
 class G1DRealEnvironmentTest(unittest.TestCase):
+    def test_rtc_references_and_weights(self) -> None:
+        policy = mock.Mock()
+        policy.infer.return_value = {"actions": np.zeros((4, 16))}
+        obs = observation(17)
+        obs["observation/state"][0] = 1
+        obs.update(rtc_prefix=np.full((3, 16), 11), rtc_delay=1)
+        for absolute in (False, True):
+            env = environment(policy, rtc=True, state_dim=17, action_horizon=4, absolute_joint_targets=absolute)
+            env.infer(obs)
+            args, kwargs = policy.infer.call_args
+            expected = np.full((3, 16), 11 if absolute else 1)
+            expected[:, [7, 15]] = 11
+            np.testing.assert_array_equal(args[0]["actions"][:3], expected)
+            np.testing.assert_allclose(kwargs["rtc_weights"][:, 0], [1, 2/3, 1/3, 0])
+
+    def test_rtc_delay_must_be_covered_by_prefix(self) -> None:
+        obs = observation()
+        obs.update(rtc_prefix=np.ones((1, 16)), rtc_delay=2)
+        policy = mock.Mock()
+        with self.assertRaisesRegex(ValueError, "rtc_delay"):
+            environment(policy, rtc=True).infer(obs)
+        policy.infer.assert_not_called()
+
     def test_absolute_joint_and_relative_eef_responses(self) -> None:
         for space, dim in (("joint", 16), ("eef", 14)):
             with self.subTest(space=space):

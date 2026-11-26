@@ -374,7 +374,7 @@ class PI0Pytorch(nn.Module):
         return F.mse_loss(u_t, v_t, reduction="none")
 
     @torch.no_grad()
-    def sample_actions(self, device, observation, noise=None, num_steps=10) -> Tensor:
+    def sample_actions(self, device, observation, noise=None, num_steps=10, rtc_prefix=None, rtc_weights=None) -> Tensor:
         """Do a full inference forward and compute the action (batch_size x num_steps x num_motors)"""
         bsize = observation.state.shape[0]
         if noise is None:
@@ -406,13 +406,16 @@ class PI0Pytorch(nn.Module):
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
             expanded_time = time.expand(bsize)
-            v_t = self.denoise_step(
-                state,
-                prefix_pad_masks,
-                past_key_values,
-                x_t,
-                expanded_time,
-            )
+            with torch.set_grad_enabled(rtc_prefix is not None):
+                if rtc_prefix is not None:
+                    x_t = x_t.detach().requires_grad_(True)
+                v_t = self.denoise_step(state, prefix_pad_masks, past_key_values, x_t, expanded_time)
+                if rtc_prefix is not None:
+                    clean = x_t - time * v_t
+                    residual = rtc_weights * (rtc_prefix - clean.detach())
+                    correction, = torch.autograd.grad(clean, x_t, grad_outputs=residual)
+                    gain = ((time.square() + (1 - time).square()) / (time * (1 - time)).clamp_min(1e-8)).clamp_max(5)
+                    v_t = v_t - gain * correction
 
             # Euler step - use new tensor assignment instead of in-place operation
             x_t = x_t + dt * v_t

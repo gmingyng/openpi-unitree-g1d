@@ -25,6 +25,8 @@ class G1DRealEnvironment(base_policy.BasePolicy):
         action_horizon: int,
         default_prompt: str | None = None,
         eef_delta_frame: Literal["base", "tool"] = "base",
+        rtc: bool = False,
+        absolute_joint_targets: bool = False,
         metadata: dict | None = None,
     ) -> None:
         if action_space not in ("joint", "eef") or eef_delta_frame not in ("base", "tool"):
@@ -36,12 +38,15 @@ class G1DRealEnvironment(base_policy.BasePolicy):
         self._action_space = action_space
         self.action_dim = action_dim
         self.state_dim = state_dim
+        self._rtc = rtc
+        self._absolute_joint_targets = absolute_joint_targets
         self._policy = policy
         self._horizon = action_horizon
         self._default_prompt = default_prompt
         self.metadata = {
             **(metadata or {}),
             "g1d": {
+                "rtc": rtc,
                 "protocol": "openpi-observation-v1",
                 "state_key": "observation/state",
                 "state_dim": self.state_dim,
@@ -71,7 +76,23 @@ class G1DRealEnvironment(base_policy.BasePolicy):
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError("Send a nonempty prompt or configure --default-prompt")
         inputs["prompt"] = prompt
-        result = dict(self._policy.infer(inputs))
+        if "rtc_prefix" in obs or "rtc_delay" in obs:
+            if not self._rtc:
+                raise ValueError("Start the server with --rtc to send an RTC prefix")
+            prefix = g1d_policy.validate_actions(obs.get("rtc_prefix"), self.action_dim)
+            delay = obs.get("rtc_delay")
+            if type(delay) is not int or not 0 <= delay <= len(prefix) <= self._horizon:
+                raise ValueError("RTC requires 0 <= integer rtc_delay <= prefix length <= action horizon")
+            if self._action_space == "joint" and not self._absolute_joint_targets:
+                prefix[:, :7] -= inputs["observation/state"][-16:-9]
+                prefix[:, 8:15] -= inputs["observation/state"][-8:-1]
+            inputs["actions"] = np.pad(prefix, ((0, self._horizon - len(prefix)), (0, 0)))
+            weights = np.zeros_like(inputs["actions"])
+            weights[:delay] = 1
+            weights[delay:len(prefix)] = np.linspace(1, 0, len(prefix) - delay + 2)[1:-1, None]
+            result = dict(self._policy.infer(inputs, rtc_weights=weights))
+        else:
+            result = dict(self._policy.infer(inputs))
         result["actions"] = g1d_policy.validate_actions(
             result["actions"], self.action_dim, horizon=self._horizon
         )
@@ -92,6 +113,7 @@ def create_environment(
     *,
     default_prompt: str | None = None,
     pytorch_device: str | None = None,
+    rtc: bool = False,
 ) -> G1DRealEnvironment:
     """Load policy and resolve the network contract from its training config.
 
@@ -109,13 +131,15 @@ def create_environment(
     policy = policy_config.create_trained_policy(
         train_config, checkpoint, default_prompt=prompt, pytorch_device=pytorch_device
     )
-    return wrap_policy(policy, train_config, config_name, prompt)
+    return wrap_policy(policy, train_config, config_name, prompt, rtc=rtc)
 
 
-def wrap_policy(policy, train_config, config_name: str, prompt: str | None) -> G1DRealEnvironment:
+def wrap_policy(policy, train_config, config_name: str, prompt: str | None, *, rtc: bool = False) -> G1DRealEnvironment:
     data_factory = train_config.data
     return G1DRealEnvironment(
         policy,
+        rtc=rtc,
+        absolute_joint_targets=getattr(data_factory, "absolute_joint_targets", False),
         action_space=data_factory.action_space,
         state_dim=data_factory.state_dim,
         action_dim=data_factory.action_dim,
