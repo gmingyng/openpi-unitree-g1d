@@ -816,7 +816,7 @@ _CONFIGS = [
         
         ema_decay=0.99,
         batch_size = 256,
-        fsdp_devices = 8,
+        fsdp_devices = 7,
         # Number of workers to use for the data loader. Increasing this number will speed up data loading but
         # will increase memory and CPU usage.
         num_workers = 2,
