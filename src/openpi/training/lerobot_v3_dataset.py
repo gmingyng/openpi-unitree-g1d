@@ -76,7 +76,7 @@ class LocalLeRobotV3Dataset:
             video = self.root / self.info["video_path"].format(video_key=key, chunk_index=ep[prefix + "chunk_index"],
                                                                file_index=ep[prefix + "file_index"])
             timestamp = ep[prefix + "from_timestamp"] + float(sample["timestamp"])
-            sample[key] = decode_video_frames(video, [timestamp], tolerance_s=1e-4, backend="pyav")[0]
+            sample[key] = decode_video_frames(video, [timestamp], tolerance_s=1e-4, backend="torchcodec")[0]
         sample["task"] = self.tasks[int(sample["task_index"])]
         if self.prompt_from_task:
             sample["prompt"] = sample["task"]
